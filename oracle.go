@@ -57,7 +57,7 @@ func (d oracle) sqlType(f interface{}, size int) string {
 func (d oracle) insert(q *Qbs) (int64, error) {
 	sql, args := d.dialect.insertSql(q.criteria)
 	row := q.QueryRow(sql, args...)
-	value := q.criteria.model.pk.value
+	value := q.criteria.model.Pk.value
 	var err error
 	var id int64
 	if _, ok := value.(int64); ok {
@@ -71,7 +71,7 @@ func (d oracle) insert(q *Qbs) (int64, error) {
 
 func (d oracle) insertSql(criteria *criteria) (string, []interface{}) {
 	sql, values := d.base.insertSql(criteria)
-	sql += " RETURNING " + d.dialect.quote(criteria.model.pk.name)
+	sql += " RETURNING " + d.dialect.quote(criteria.model.Pk.Name)
 	return sql, values
 }
 
@@ -130,12 +130,12 @@ func (d oracle) primaryKeySql(isString bool, size int) string {
 	return fmt.Sprintf("NUMBER(%d) PRIMARY KEY NOT NULL", size)
 }
 
-func (d oracle) createTableSql(model *model, ifNotExists bool) string {
+func (d oracle) createTableSql(model *Model, ifNotExists bool) string {
 	baseSql := d.base.createTableSql(model, false)
-	if _, isString := model.pk.value.(string); isString {
+	if _, isString := model.Pk.value.(string); isString {
 		return baseSql
 	}
-	table_pk := model.table + "_" + model.pk.name
+	table_pk := model.Table + "_" + model.Pk.Name
 	sequence := " CREATE SEQUENCE " + table_pk + "_seq" +
 		" MINVALUE 1 NOMAXVALUE START WITH 1 INCREMENT BY 1 NOCACHE CYCLE"
 	trigger := " CREATE TRIGGER " + table_pk + "_triger BEFORE INSERT ON " + table_pk +

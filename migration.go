@@ -16,7 +16,7 @@ type Migration struct {
 // CreateTableIfNotExists creates a new table and its indexes based on the table struct type
 // It will panic if table creation failed, and it will return error if the index creation failed.
 func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
-	model := structPtrToModel(structPtr, true, nil)
+	model := StructPtrToModel(structPtr, true, nil)
 	sql := mg.dialect.createTableSql(model, true)
 	if mg.Log {
 		fmt.Println(sql)
@@ -28,12 +28,12 @@ func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
 			panic(err)
 		}
 	}
-	columns := mg.dialect.columnsInTable(mg, model.table)
-	if len(model.fields) > len(columns) {
-		oldFields := []*modelField{}
-		newFields := []*modelField{}
-		for _, v := range model.fields {
-			if _, ok := columns[v.name]; ok {
+	columns := mg.dialect.columnsInTable(mg, model.Table)
+	if len(model.Fields) > len(columns) {
+		oldFields := []*ModelField{}
+		newFields := []*ModelField{}
+		for _, v := range model.Fields {
+			if _, ok := columns[v.Name]; ok {
 				oldFields = append(oldFields, v)
 			} else {
 				newFields = append(newFields, v)
@@ -43,12 +43,12 @@ func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
 			panic("Column name has changed, rename column migration is not supported.")
 		}
 		for _, v := range newFields {
-			mg.addColumn(model.table, v)
+			mg.addColumn(model.Table, v)
 		}
 	}
 	var indexErr error
-	for _, i := range model.indexes {
-		indexErr = mg.CreateIndexIfNotExists(model.table, i.name, i.unique, i.columns...)
+	for _, i := range model.Indexes {
+		indexErr = mg.CreateIndexIfNotExists(model.Table, i.Name, i.Unique, i.Columns...)
 	}
 	return indexErr
 }
@@ -71,8 +71,8 @@ func (mg *Migration) DropTable(strutPtr interface{}) {
 	mg.dropTableIfExists(strutPtr)
 }
 
-func (mg *Migration) addColumn(table string, column *modelField) {
-	sql := mg.dialect.addColumnSql(table, column.name, column.value, column.size)
+func (mg *Migration) addColumn(table string, column *ModelField) {
+	sql := mg.dialect.addColumnSql(table, column.Name, column.value, column.size)
 	if mg.Log {
 		fmt.Println(sql)
 	}

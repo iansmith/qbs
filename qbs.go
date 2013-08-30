@@ -240,11 +240,11 @@ func (q *Qbs) OmitJoin() *Qbs {
 // the values obtained by the query.
 // If not found, "sql.ErrNoRows" will be returned.
 func (q *Qbs) Find(structPtr interface{}) error {
-	q.criteria.model = structPtrToModel(structPtr, !q.criteria.omitJoin, q.criteria.omitFields)
+	q.criteria.model = StructPtrToModel(structPtr, !q.criteria.omitJoin, q.criteria.omitFields)
 	q.criteria.limit = 1
 	if !q.criteria.model.pkZero() {
-		idPath := q.Dialect.quote(q.criteria.model.table) + "." + q.Dialect.quote(q.criteria.model.pk.name)
-		idCondition := NewCondition(idPath+" = ?", q.criteria.model.pk.value)
+		idPath := q.Dialect.quote(q.criteria.model.Table) + "." + q.Dialect.quote(q.criteria.model.Pk.Name)
+		idCondition := NewCondition(idPath+" = ?", q.criteria.model.Pk.value)
 		if q.criteria.condition == nil {
 			q.criteria.condition = idCondition
 		} else {
@@ -260,7 +260,7 @@ func (q *Qbs) Find(structPtr interface{}) error {
 func (q *Qbs) FindAll(ptrOfSliceOfStructPtr interface{}) error {
 	strucType := reflect.TypeOf(ptrOfSliceOfStructPtr).Elem().Elem().Elem()
 	strucPtr := reflect.New(strucType).Interface()
-	q.criteria.model = structPtrToModel(strucPtr, !q.criteria.omitJoin, q.criteria.omitFields)
+	q.criteria.model = StructPtrToModel(strucPtr, !q.criteria.omitJoin, q.criteria.omitFields)
 	query, args := q.Dialect.querySql(q.criteria)
 	return q.doQueryRows(ptrOfSliceOfStructPtr, query, args...)
 }
@@ -443,8 +443,8 @@ func (q *Qbs) Save(structPtr interface{}) (affected int64, err error) {
 			return
 		}
 	}
-	model := structPtrToModel(structPtr, true, q.criteria.omitFields)
-	if model.pk == nil {
+	model := StructPtrToModel(structPtr, true, q.criteria.omitFields)
+	if model.Pk == nil {
 		panic("no primary key field")
 	}
 	q.criteria.model = model
@@ -456,7 +456,7 @@ func (q *Qbs) Save(structPtr interface{}) (affected int64, err error) {
 	}
 	createdModelField := model.timeField("created")
 	var isInsert bool
-	if !model.pkZero() && q.WhereEqual(model.pk.name, model.pk.value).Count(model.table) > 0 { //id is given, can be an update operation.
+	if !model.pkZero() && q.WhereEqual(model.Pk.Name, model.Pk.value).Count(model.Table) > 0 { //id is given, can be an update operation.
 		affected, err = q.Dialect.update(q)
 	} else {
 		if createdModelField != nil {
@@ -470,17 +470,17 @@ func (q *Qbs) Save(structPtr interface{}) (affected int64, err error) {
 	}
 	if err == nil {
 		structValue := reflect.Indirect(reflect.ValueOf(structPtr))
-		if _, ok := model.pk.value.(int64); ok && id != 0 {
-			idField := structValue.FieldByName(model.pk.camelName)
+		if _, ok := model.Pk.value.(int64); ok && id != 0 {
+			idField := structValue.FieldByName(model.Pk.CamelName)
 			idField.SetInt(id)
 		}
 		if updateModelField != nil {
-			updateField := structValue.FieldByName(updateModelField.camelName)
+			updateField := structValue.FieldByName(updateModelField.CamelName)
 			updateField.Set(reflect.ValueOf(now))
 		}
 		if isInsert {
 			if createdModelField != nil {
-				createdField := structValue.FieldByName(createdModelField.camelName)
+				createdField := structValue.FieldByName(createdModelField.CamelName)
 				createdField.Set(reflect.ValueOf(now))
 			}
 		}
@@ -511,8 +511,8 @@ func (q *Qbs) BulkInsert(sliceOfStructPtr interface{}) error {
 				return q.updateTxError(err)
 			}
 		}
-		model := structPtrToModel(structPtrInter, false, nil)
-		if model.pk == nil {
+		model := StructPtrToModel(structPtrInter, false, nil)
+		if model.Pk == nil {
 			panic("no primary key field")
 		}
 		q.criteria.model = model
@@ -521,8 +521,8 @@ func (q *Qbs) BulkInsert(sliceOfStructPtr interface{}) error {
 		if err != nil {
 			return q.updateTxError(err)
 		}
-		if _, ok := model.pk.value.(int64); ok && id != 0 {
-			idField := structPtr.Elem().FieldByName(model.pk.camelName)
+		if _, ok := model.Pk.value.(int64); ok && id != 0 {
+			idField := structPtr.Elem().FieldByName(model.Pk.CamelName)
 			idField.SetInt(id)
 		}
 	}
@@ -542,7 +542,7 @@ func (q *Qbs) Update(structPtr interface{}) (affected int64, err error) {
 			return 0, err
 		}
 	}
-	model := structPtrToModel(structPtr, true, q.criteria.omitFields)
+	model := StructPtrToModel(structPtr, true, q.criteria.omitFields)
 	q.criteria.model = model
 	q.criteria.mergePkCondition(q.Dialect)
 	if q.criteria.condition == nil {
@@ -554,7 +554,7 @@ func (q *Qbs) Update(structPtr interface{}) (affected int64, err error) {
 // The delete condition can be inferred by the Id value of the struct
 // If neither Id value or condition are provided, it would cause runtime panic
 func (q *Qbs) Delete(structPtr interface{}) (affected int64, err error) {
-	model := structPtrToModel(structPtr, true, q.criteria.omitFields)
+	model := StructPtrToModel(structPtr, true, q.criteria.omitFields)
 	q.criteria.model = model
 	q.criteria.mergePkCondition(q.Dialect)
 	if q.criteria.condition == nil {
@@ -736,7 +736,7 @@ func (q *Qbs) QueryStruct(dest interface{}, query string, args ...interface{}) e
 //which will get called on each row, the in `do` function the structPtr's value will be set to the current row's value..
 //if `do` function returns an error, the iteration will be stopped.
 func (q *Qbs) Iterate(structPtr interface{}, do func() error) error {
-	q.criteria.model = structPtrToModel(structPtr, !q.criteria.omitJoin, q.criteria.omitFields)
+	q.criteria.model = StructPtrToModel(structPtr, !q.criteria.omitJoin, q.criteria.omitFields)
 	query, args := q.Dialect.querySql(q.criteria)
 	q.log(query, args...)
 	defer q.Reset()

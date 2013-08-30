@@ -82,28 +82,28 @@ func (d base) setModelValue(driverValue, fieldValue reflect.Value) error {
 func (d base) querySql(criteria *criteria) (string, []interface{}) {
 	query := new(bytes.Buffer)
 	args := make([]interface{}, 0, 20)
-	table := d.dialect.quote(criteria.model.table)
+	table := d.dialect.quote(criteria.model.Table)
 	columns := []string{}
 	tables := []string{table}
-	hasJoin := len(criteria.model.refs) > 0
-	for _, v := range criteria.model.fields {
-		colName := d.dialect.quote(v.name)
+	hasJoin := len(criteria.model.Refs) > 0
+	for _, v := range criteria.model.Fields {
+		colName := d.dialect.quote(v.Name)
 		if hasJoin {
-			colName = d.dialect.quote(criteria.model.table) + "." + colName
+			colName = d.dialect.quote(criteria.model.Table) + "." + colName
 		}
 		columns = append(columns, colName)
 	}
-	for k, v := range criteria.model.refs {
+	for k, v := range criteria.model.Refs {
 		tableAlias := StructNameToTableName(k)
 		quotedTableAlias := d.dialect.quote(tableAlias)
-		quotedParentTable := d.dialect.quote(v.model.table)
-		leftKey := table + "." + d.dialect.quote(v.refKey)
-		parentPrimary := quotedTableAlias + "." + d.dialect.quote(v.model.pk.name)
+		quotedParentTable := d.dialect.quote(v.Model.Table)
+		leftKey := table + "." + d.dialect.quote(v.RefKey)
+		parentPrimary := quotedTableAlias + "." + d.dialect.quote(v.Model.Pk.Name)
 		joinClause := fmt.Sprintf("LEFT JOIN %v AS %v ON %v = %v", quotedParentTable, quotedTableAlias, leftKey, parentPrimary)
 		tables = append(tables, joinClause)
-		for _, f := range v.model.fields {
-			alias := tableAlias + "___" + f.name
-			columns = append(columns, d.dialect.quote(tableAlias+"."+f.name)+" AS "+alias)
+		for _, f := range v.Model.Fields {
+			alias := tableAlias + "___" + f.Name
+			columns = append(columns, d.dialect.quote(tableAlias+"."+f.Name)+" AS "+alias)
 		}
 	}
 	query.WriteString("SELECT ")
@@ -165,7 +165,7 @@ func (d base) insertSql(criteria *criteria) (string, []interface{}) {
 	}
 	sql := fmt.Sprintf(
 		"INSERT INTO %v (%v) VALUES (%v)",
-		d.dialect.quote(criteria.model.table),
+		d.dialect.quote(criteria.model.Table),
 		strings.Join(quotedColumns, ", "),
 		strings.Join(markers, ", "),
 	)
@@ -191,7 +191,7 @@ func (d base) updateSql(criteria *criteria) (string, []interface{}) {
 	conditionSql, args := criteria.condition.Merge()
 	sql := fmt.Sprintf(
 		"UPDATE %v SET %v WHERE %v",
-		d.dialect.quote(criteria.model.table),
+		d.dialect.quote(criteria.model.Table),
 		strings.Join(pairs, ", "),
 		conditionSql,
 	)
@@ -210,19 +210,19 @@ func (d base) delete(q *Qbs) (int64, error) {
 
 func (d base) deleteSql(criteria *criteria) (string, []interface{}) {
 	conditionSql, args := criteria.condition.Merge()
-	sql := "DELETE FROM " + d.dialect.quote(criteria.model.table) + " WHERE " + conditionSql
+	sql := "DELETE FROM " + d.dialect.quote(criteria.model.Table) + " WHERE " + conditionSql
 	return sql, args
 }
 
-func (d base) createTableSql(model *model, ifNotExists bool) string {
+func (d base) createTableSql(model *Model, ifNotExists bool) string {
 	a := []string{"CREATE TABLE "}
 	if ifNotExists {
 		a = append(a, "IF NOT EXISTS ")
 	}
-	a = append(a, d.dialect.quote(model.table), " ( ")
-	for i, field := range model.fields {
+	a = append(a, d.dialect.quote(model.Table), " ( ")
+	for i, field := range model.Fields {
 		b := []string{
-			d.dialect.quote(field.name),
+			d.dialect.quote(field.Name),
 		}
 		if field.pk {
 			_, ok := field.value.(string)
@@ -237,14 +237,14 @@ func (d base) createTableSql(model *model, ifNotExists bool) string {
 			}
 		}
 		a = append(a, strings.Join(b, " "))
-		if i < len(model.fields)-1 {
+		if i < len(model.Fields)-1 {
 			a = append(a, ", ")
 		}
 	}
-	for _, v := range model.refs {
-		if v.foreignKey {
-			a = append(a, ", FOREIGN KEY (", d.dialect.quote(v.refKey), ") REFERENCES ")
-			a = append(a, d.dialect.quote(v.model.table), " (", d.dialect.quote(v.model.pk.name), ") ON DELETE CASCADE")
+	for _, v := range model.Refs {
+		if v.ForeignKey {
+			a = append(a, ", FOREIGN KEY (", d.dialect.quote(v.RefKey), ") REFERENCES ")
+			a = append(a, d.dialect.quote(v.Model.Table), " (", d.dialect.quote(v.Model.Pk.Name), ") ON DELETE CASCADE")
 		}
 	}
 	a = append(a, " )")

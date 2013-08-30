@@ -7,10 +7,10 @@ import (
 
 func TestParseTags(t *testing.T) {
 	assert := NewAssert(t)
-	fd := new(modelField)
+	fd := new(ModelField)
 	parseTags(fd, `fk:User`)
 	assert.Equal("User", fd.fk)
-	fd = new(modelField)
+	fd = new(ModelField)
 	parseTags(fd, `notnull,default:'banana'`)
 	assert.True(fd.notnull)
 	assert.Equal("'banana'", fd.dfault)
@@ -23,8 +23,8 @@ func TestFieldOmit(t *testing.T) {
 		B string
 		C string
 	}
-	m := structPtrToModel(&Schema{}, true, []string{"C"})
-	assert.Equal(1, len(m.fields))
+	m := StructPtrToModel(&Schema{}, true, []string{"C"})
+	assert.Equal(1, len(m.Fields))
 }
 
 func TestInterfaceToModelWithReference(t *testing.T) {
@@ -42,10 +42,10 @@ func TestInterfaceToModelWithReference(t *testing.T) {
 	table1 := &table{
 		6, 3, &parent{3, "Mrs. A", "infinite"},
 	}
-	m := structPtrToModel(table1, true, nil)
-	ref, ok := m.refs["Father"]
+	m := StructPtrToModel(table1, true, nil)
+	ref, ok := m.Refs["Father"]
 	assert.MustTrue(ok)
-	f := ref.model.fields[1]
+	f := ref.Model.Fields[1]
 	x, ok := f.value.(string)
 	assert.True(ok)
 	assert.Equal("Mrs. A", x)
@@ -71,28 +71,28 @@ func TestInterfaceToModel(t *testing.T) {
 		ColVarChar: "orange",
 		ColTime:    now,
 	}
-	m := structPtrToModel(table1, true, nil)
-	assert.Equal("col_primary", m.pk.name)
-	assert.Equal(4, len(m.fields))
-	assert.Equal(2, len(m.indexes))
-	assert.Equal("col_primary_col_time", m.indexes[0].name)
-	assert.True(!m.indexes[0].unique)
-	assert.Equal("col_var_char_col_time", m.indexes[1].name)
-	assert.True(m.indexes[1].unique)
+	m := StructPtrToModel(table1, true, nil)
+	assert.Equal("col_primary", m.Pk.Name)
+	assert.Equal(4, len(m.Fields))
+	assert.Equal(2, len(m.Indexes))
+	assert.Equal("col_primary_col_time", m.Indexes[0].Name)
+	assert.True(!m.Indexes[0].Unique)
+	assert.Equal("col_var_char_col_time", m.Indexes[1].Name)
+	assert.True(m.Indexes[1].Unique)
 
-	f := m.fields[0]
+	f := m.Fields[0]
 	assert.Equal(6, f.value)
 	assert.True(f.pk)
 
-	f = m.fields[1]
+	f = m.Fields[1]
 	assert.Equal("'banana'", f.dfault)
 
-	f = m.fields[2]
+	f = m.Fields[2]
 	str, _ := f.value.(string)
 	assert.Equal("orange", str)
 	assert.Equal(64, f.size)
 
-	f = m.fields[3]
+	f = m.Fields[3]
 	tm, _ := f.value.(time.Time)
 	assert.Equal(now, tm)
 }
@@ -111,8 +111,8 @@ func TestInterfaceToSubModel(t *testing.T) {
 		unexported int64
 	}
 	pst := new(Post)
-	model := structPtrToModel(pst, true, nil)
-	assert.Equal(1, len(model.refs))
+	model := StructPtrToModel(pst, true, nil)
+	assert.Equal(1, len(model.Refs))
 }
 
 func TestColumnsAndValues(t *testing.T) {
@@ -122,7 +122,7 @@ func TestColumnsAndValues(t *testing.T) {
 		Name string
 	}
 	user := new(User)
-	model := structPtrToModel(user, true, nil)
+	model := StructPtrToModel(user, true, nil)
 	columns, values := model.columnsAndValues(false)
 	assert.MustEqual(1, len(columns))
 	assert.MustEqual(1, len(values))

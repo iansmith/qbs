@@ -22,14 +22,14 @@ var ColumnNameToFieldName func(string) string = snakeToUpperCamel
 var TableNameToStructName func(string) string = snakeToUpperCamel
 
 // Index represents a table index and is returned via the Indexed interface.
-type index struct {
-	name    string
-	columns []string
-	unique  bool
+type Index struct {
+	Name    string
+	Columns []string
+	Unique  bool
 }
 
 // Indexes represents an array of indexes.
-type Indexes []*index
+type Indexes []*Index
 
 type Indexed interface {
 	Indexes(indexes *Indexes)
@@ -38,19 +38,19 @@ type Indexed interface {
 // Add adds an index
 func (ix *Indexes) Add(columns ...string) {
 	name := strings.Join(columns, "_")
-	*ix = append(*ix, &index{name: name, columns: columns, unique: false})
+	*ix = append(*ix, &Index{Name: name, Columns: columns, Unique: false})
 }
 
 // AddUnique adds an unique index
 func (ix *Indexes) AddUnique(columns ...string) {
 	name := strings.Join(columns, "_")
-	*ix = append(*ix, &index{name: name, columns: columns, unique: true})
+	*ix = append(*ix, &Index{Name: name, Columns: columns, Unique: true})
 }
 
 // ModelField represents a schema field of a parsed model.
-type modelField struct {
-	name      string // Column name
-	camelName string
+type ModelField struct {
+	Name      string // Column name
+	CamelName string
 	value     interface{} // Value
 	pk        bool
 	notnull   bool
@@ -65,24 +65,24 @@ type modelField struct {
 }
 
 // Model represents a parsed schema interface{}.
-type model struct {
-	pk      *modelField
-	table   string
-	fields  []*modelField
-	refs    map[string]*reference
-	indexes Indexes
+type Model struct {
+	Pk      *ModelField
+	Table   string
+	Fields  []*ModelField
+	Refs    map[string]*Reference
+	Indexes Indexes
 }
 
-type reference struct {
-	refKey     string
-	model      *model
-	foreignKey bool
+type Reference struct {
+	RefKey     string
+	Model      *Model
+	ForeignKey bool
 }
 
-func (model *model) columnsAndValues(forUpdate bool) ([]string, []interface{}) {
-	columns := make([]string, 0, len(model.fields))
+func (model *Model) columnsAndValues(forUpdate bool) ([]string, []interface{}) {
+	columns := make([]string, 0, len(model.Fields))
 	values := make([]interface{}, 0, len(columns))
-	for _, column := range model.fields {
+	for _, column := range model.Fields {
 		var include bool
 		if forUpdate {
 			include = column.value != nil && !column.pk
@@ -99,15 +99,15 @@ func (model *model) columnsAndValues(forUpdate bool) ([]string, []interface{}) {
 			}
 		}
 		if include {
-			columns = append(columns, column.name)
+			columns = append(columns, column.Name)
 			values = append(values, column.value)
 		}
 	}
 	return columns, values
 }
 
-func (model *model) timeField(name string) *modelField {
-	for _, v := range model.fields {
+func (model *Model) timeField(name string) *ModelField {
+	for _, v := range model.Fields {
 		if _, ok := v.value.(time.Time); ok {
 			if name == "created" {
 				if v.created {
@@ -118,7 +118,7 @@ func (model *model) timeField(name string) *modelField {
 					return v
 				}
 			}
-			if v.name == name {
+			if v.Name == name {
 				return v
 			}
 		}
@@ -126,39 +126,39 @@ func (model *model) timeField(name string) *modelField {
 	return nil
 }
 
-func (model *model) pkZero() bool {
-	if model.pk == nil {
+func (model *Model) pkZero() bool {
+	if model.Pk == nil {
 		return true
 	}
-	switch model.pk.value.(type) {
+	switch model.Pk.value.(type) {
 	case string:
-		return model.pk.value.(string) == ""
+		return model.Pk.value.(string) == ""
 	case int8:
-		return model.pk.value.(int8) == 0
+		return model.Pk.value.(int8) == 0
 	case int16:
-		return model.pk.value.(int16) == 0
+		return model.Pk.value.(int16) == 0
 	case int32:
-		return model.pk.value.(int32) == 0
+		return model.Pk.value.(int32) == 0
 	case int64:
-		return model.pk.value.(int64) == 0
+		return model.Pk.value.(int64) == 0
 	case uint8:
-		return model.pk.value.(uint8) == 0
+		return model.Pk.value.(uint8) == 0
 	case uint16:
-		return model.pk.value.(uint16) == 0
+		return model.Pk.value.(uint16) == 0
 	case uint32:
-		return model.pk.value.(uint32) == 0
+		return model.Pk.value.(uint32) == 0
 	case uint64:
-		return model.pk.value.(uint64) == 0
+		return model.Pk.value.(uint64) == 0
 	}
 	return true
 }
 
-func structPtrToModel(f interface{}, root bool, omitFields []string) *model {
-	model := &model{
-		pk:      nil,
-		table:   tableName(f),
-		fields:  []*modelField{},
-		indexes: Indexes{},
+func StructPtrToModel(f interface{}, root bool, omitFields []string) *Model {
+	model := &Model{
+		Pk:      nil,
+		Table:   tableName(f),
+		Fields:  []*ModelField{},
+		Indexes: Indexes{},
 	}
 	structType := reflect.TypeOf(f).Elem()
 	structValue := reflect.ValueOf(f).Elem()
@@ -192,18 +192,18 @@ func structPtrToModel(f interface{}, root bool, omitFields []string) *model {
 			}
 		}
 
-		fd := new(modelField)
+		fd := new(ModelField)
 		parseTags(fd, sqlTag)
-		fd.camelName = structField.Name
-		fd.name = FieldNameToColumnName(structField.Name)
+		fd.CamelName = structField.Name
+		fd.Name = FieldNameToColumnName(structField.Name)
 		fd.value = fieldValue.Interface()
-		if _, ok := fd.value.(int64); ok && fd.camelName == "Id" {
+		if _, ok := fd.value.(int64); ok && fd.CamelName == "Id" {
 			fd.pk = true
 		}
 		if fd.pk {
-			model.pk = fd
+			model.Pk = fd
 		}
-		model.fields = append(model.fields, fd)
+		model.Fields = append(model.Fields, fd)
 		// fill in references map only in root model.
 		if root {
 			var fk, explicitJoin, implicitJoin bool
@@ -215,11 +215,11 @@ func structPtrToModel(f interface{}, root bool, omitFields []string) *model {
 				refName = fd.join
 				explicitJoin = true
 			}
-			if len(fd.camelName) > 3 && strings.HasSuffix(fd.camelName, "Id") {
+			if len(fd.CamelName) > 3 && strings.HasSuffix(fd.CamelName, "Id") {
 				fdValue := reflect.ValueOf(fd.value)
 				if _, ok := fd.value.(sql.NullInt64); ok || fdValue.Kind() == reflect.Int64 {
-					i := strings.LastIndex(fd.camelName, "Id")
-					refName = fd.camelName[:i]
+					i := strings.LastIndex(fd.CamelName, "Id")
+					refName = fd.CamelName[:i]
 					implicitJoin = true
 				}
 			}
@@ -233,19 +233,19 @@ func structPtrToModel(f interface{}, root bool, omitFields []string) *model {
 				if field, ok := structType.FieldByName(refName); ok && !omit {
 					fieldValue := structValue.FieldByName(refName)
 					if fieldValue.Kind() == reflect.Ptr {
-						model.indexes.Add(fd.name)
+						model.Indexes.Add(fd.Name)
 						if fieldValue.IsNil() {
 							fieldValue.Set(reflect.New(field.Type.Elem()))
 						}
-						refModel := structPtrToModel(fieldValue.Interface(), false, nil)
-						ref := new(reference)
-						ref.foreignKey = fk
-						ref.model = refModel
-						ref.refKey = fd.name
-						if model.refs == nil {
-							model.refs = make(map[string]*reference)
+						refModel := StructPtrToModel(fieldValue.Interface(), false, nil)
+						ref := new(Reference)
+						ref.ForeignKey = fk
+						ref.Model = refModel
+						ref.RefKey = fd.Name
+						if model.Refs == nil {
+							model.Refs = make(map[string]*Reference)
 						}
-						model.refs[refName] = ref
+						model.Refs[refName] = ref
 					} else if !implicitJoin {
 						panic("Referenced field is not pointer")
 					}
@@ -254,15 +254,15 @@ func structPtrToModel(f interface{}, root bool, omitFields []string) *model {
 				}
 			}
 			if fd.unique {
-				model.indexes.AddUnique(fd.name)
+				model.Indexes.AddUnique(fd.Name)
 			} else if fd.index {
-				model.indexes.Add(fd.name)
+				model.Indexes.Add(fd.Name)
 			}
 		}
 	}
 	if root {
 		if indexed, ok := f.(Indexed); ok {
-			indexed.Indexes(&model.indexes)
+			indexed.Indexes(&model.Indexes)
 		}
 	}
 	return model
@@ -287,7 +287,7 @@ func tableName(talbe interface{}) string {
 	return StructNameToTableName(t.Name())
 }
 
-func parseTags(fd *modelField, s string) {
+func parseTags(fd *ModelField, s string) {
 	if s == "" {
 		return
 	}

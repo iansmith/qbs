@@ -34,7 +34,7 @@ type Dialect interface {
 
 	deleteSql(criteria *criteria) (string, []interface{})
 
-	createTableSql(model *model, ifNotExists bool) string
+	createTableSql(model *Model, ifNotExists bool) string
 
 	dropTableSql(table string) string
 

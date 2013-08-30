@@ -88,7 +88,7 @@ func (d postgres) sqlType(f interface{}, size int) string {
 func (d postgres) insert(q *Qbs) (int64, error) {
 	sql, args := d.dialect.insertSql(q.criteria)
 	row := q.QueryRow(sql, args...)
-	value := q.criteria.model.pk.value
+	value := q.criteria.model.Pk.value
 	var err error
 	var id int64
 	if _, ok := value.(int64); ok {
@@ -102,7 +102,7 @@ func (d postgres) insert(q *Qbs) (int64, error) {
 
 func (d postgres) insertSql(criteria *criteria) (string, []interface{}) {
 	sql, values := d.base.insertSql(criteria)
-	sql += " RETURNING " + d.dialect.quote(criteria.model.pk.name)
+	sql += " RETURNING " + d.dialect.quote(criteria.model.Pk.Name)
 	return sql, values
 }
 

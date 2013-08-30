@@ -1,7 +1,7 @@
 package qbs
 
 type criteria struct {
-	model      *model
+	model      *Model
 	condition  *Condition
 	orderBys   []order
 	limit      int
@@ -13,8 +13,8 @@ type criteria struct {
 func (c *criteria) mergePkCondition(d Dialect) {
 	var con *Condition
 	if !c.model.pkZero() {
-		expr := d.quote(c.model.pk.name) + " = ?"
-		con = NewCondition(expr, c.model.pk.value)
+		expr := d.quote(c.model.Pk.Name) + " = ?"
+		con = NewCondition(expr, c.model.Pk.value)
 		con.AndCondition(c.condition)
 	} else {
 		con = c.condition
