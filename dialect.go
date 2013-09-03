@@ -90,7 +90,7 @@ func (dsn *DataSourceName) String() string {
 			variables = "?" + strings.Join(dsn.Variables, "&")
 		}
 		return fmt.Sprintf(dsnformat, login, address, dsn.DbName, variables)
-	case *sqlite3:
+	case *Sqlite3:
 		return dsn.DbName
 	case *postgres:
 		pairs := []string{"user=" + dsn.Username}
@@ -126,7 +126,7 @@ func RegisterWithDataSourceName(dsn *DataSourceName) {
 	switch dsn.Dialect.(type) {
 	case *mysql:
 		driverName = "mysql"
-	case *sqlite3:
+	case *Sqlite3:
 		driverName = "sqlite3"
 	case *postgres:
 		driverName = "postgres"
