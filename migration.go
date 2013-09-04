@@ -11,19 +11,71 @@ type Migration struct {
 	dbName  string
 	dialect Dialect
 	Log     bool
+	tx      *sql.Tx
+}
+
+
+func (mg *Migration) Begin() {
+	copy, err := mg.db.Begin()
+	if err!=nil {
+		panic("Unable to start transaction in migration : %s"+ err.Error())
+	}
+	mg.tx = copy
+}
+
+func (mg *Migration) GetQbsSameTransaction() *Qbs {
+	return nil
+}
+
+func (mg *Migration) Db() *sql.DB {
+	return mg.db
+}
+
+func (mg *Migration) HasColumnOperations() bool {
+	_, ok := mg.dialect.(sqlite3)
+	return !ok
+}
+
+func (mg *Migration) Rollback() {
+	if err:=mg.tx.Rollback(); err!=nil {
+		panic("unable to rollback transaction in migration: "+ err.Error())
+	}
+}
+
+func (mg *Migration) Commit	() {
+	if err:=mg.tx.Commit(); err!=nil {
+		panic("unable to commit transaction in migration: "+ err.Error())
+	}
+}
+
+func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
+	return mg.createTableBase(structPtr, true)
+}
+
+func (mg *Migration) CreateTable(structPtr interface{}) error {
+	return mg.createTableBase(structPtr, false)
 }
 
 // CreateTableIfNotExists creates a new table and its indexes based on the table struct type
 // It will panic if table creation failed, and it will return error if the index creation failed.
-func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
+func (mg *Migration) createTableBase(structPtr interface{}, ifexist bool) error {
 	model := structPtrToModel(structPtr, true, nil)
-	sql := mg.dialect.createTableSql(model, true)
+	sql := mg.dialect.createTableSql(model, ifexist)
 	if mg.Log {
 		fmt.Println(sql)
 	}
 	sqls := strings.Split(sql, ";")
 	for _, v := range sqls {
-		_, err := mg.db.Exec(v)
+		var err error
+		if mg.tx!=nil {
+			fmt.Printf("XXXX TX: %s\n", v)	
+			_, err = mg.tx.Query(v)
+			fmt.Printf("YYY TX: %s\n",err)
+			//_, err = mg.tx.Exec(v)
+		} else {
+			_, err 	= mg.db.Exec(v)
+		}
+			
 		if err != nil && !mg.dialect.catchMigrationError(err) {
 			panic(err)
 		}
@@ -53,22 +105,39 @@ func (mg *Migration) CreateTableIfNotExists(structPtr interface{}) error {
 	return indexErr
 }
 
+
+//Used for testing
+func (mg *Migration) DropTable(strutPtr interface{}) {
+	mg.dropTableIfExists(strutPtr)
+}
+
+
 // this is only used for testing.
 func (mg *Migration) dropTableIfExists(structPtr interface{}) {
 	tn := tableName(structPtr)
 	_, err := mg.db.Exec(mg.dialect.dropTableSql(tn))
+	fmt.Printf("ERROR IN DROPTABLEIE? %v\n", err)
 	if err != nil && !mg.dialect.catchMigrationError(err) {
 		panic(err)
 	}
 }
 
-//Can only drop table on database which name has "test" suffix.
-//Used for testing
-func (mg *Migration) DropTable(strutPtr interface{}) {
-	if !strings.HasSuffix(mg.dbName, "test") {
-		panic("Drop table can only be executed on database which name has 'test' suffix")
+//Add a new column to a table.
+func (mg *Migration) AddColumn(structPtr interface{}, name string) error {
+	tn := tableName(structPtr)
+	model := structPtrToModel	(structPtr, true, nil)
+	var target *modelField
+	for _, f := range model.fields {
+		if f.name == name {
+			target = f
+			break
+		}
 	}
-	mg.dropTableIfExists(strutPtr)
+	if target==nil {
+		panic("can't find field "+name)
+	}
+	mg.addColumn(tn, target)
+	return nil
 }
 
 func (mg *Migration) addColumn(table string, column *modelField) {
@@ -82,10 +151,14 @@ func (mg *Migration) addColumn(table string, column *modelField) {
 	}
 }
 
+func (mg *Migration) RenameTable(oldname, newname string) error {
+	fmt.Printf("should be doing rename %s -> %s\n", oldname,newname)
+	return nil
+}
+
 // CreateIndex creates the specified index on table.
 // Some databases like mysql do not support this feature directly,
 // So dialect may need to query the database schema table to find out if an index exists.
-// Normally you don't need to do it explicitly, it will be created automatically in CreateTableIfNotExists method.
 func (mg *Migration) CreateIndexIfNotExists(table interface{}, name string, unique bool, columns ...string) error {
 	tn := tableName(table)
 	name = tn + "_" + name
@@ -118,7 +191,7 @@ func GetMigration() (mg *Migration, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Migration{db, dbName, dial, false}, nil
+	return &Migration{db, dbName, dial, false, nil}, nil
 }
 
 // A safe and easy way to work with Migration instance without the need to open and close it.
