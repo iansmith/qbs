@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 	"fmt"
+	"errors"
 )
 
 /**
@@ -79,12 +80,23 @@ var myMigrations = SimpleMigrationList{
 }
 
 func Migrate1_AddArticleTable(m *Schema) error {
+	if simulatePanic {
+		panic("simulated to check transactions")
+	}
+	
+	if simulateError {
+		return errors.New("simulated to check transactions")
+	}
 	return m.ChangeTable("Article", nil, &Article_migration1{})
 }
 
 func Migrate2_ChangeContent(m *Schema) error {
 	return m.ChangeTable("Article", &Article_migration1{}, &Article_migration2{})
 }
+
+// used for testing
+var simulatePanic bool
+var simulateError bool
 
 /**
  * We have move the data between the two versions of the Content column.
@@ -93,12 +105,19 @@ func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error
 
 	var err error
 
+	if simulatePanic {
+		panic("simulated to check transactions")
+	}
+	
+	if simulateError {
+		return 0, errors.New("simulated to check transactions")
+	}
+
  	raw, err := m.FindAll("Article"); 
  	if err != nil {
 		return 0, err
 	}
-	
-	
+		
 	if reverse {
 		allRows := raw.(*[]*Article_migration2)
 		for _, newRow := range *allRows {
@@ -173,7 +192,7 @@ func Migrate3_MoveAuthor(m *Schema, haveDropCol bool, reverse bool) (int, error)
 	return 0,nil
 }
 
-func setup(T *testing.T) *Migration{
+func setup(T *testing.T) *Schema{
 
 	RegisterSqlite3("/tmp/bletch.db")
 	m, err := GetMigration()
@@ -181,19 +200,17 @@ func setup(T *testing.T) *Migration{
 		T.Fatalf("unable to get the database connection open: %s", err)
 	}
 	m.Log = true
-	return m
+	simulateError = false
+	simulatePanic = false
+	
+	s:= NewSchema(m)
+	m.DropTableByName(StructNameToTableName("Article")) 
+	return 	s
 }
 
 func TestSchemaCreateBasic(T *testing.T) {
 
-	m:=setup(T)
-	s := NewSchema(m)
-	
-	//
-	// TEST PREP
-	//
-	m.DropTableByName(StructNameToTableName("Article")) 
-
+	s:=setup(T)
 
 	//
 	// CODE UNDER TEST
@@ -209,6 +226,71 @@ func TestSchemaCreateBasic(T *testing.T) {
 	confirmTableDoesntExist(T, s, "Article_migration1")
 	confirmTableDoesntExist(T, s, "Article_migration2")
 	confirmTableExists(T, s, "Article")
+
+	s.Close()
+}
+
+func TestSchemaPanicRollbackInDefChange(T *testing.T) {
+
+	s:=setup(T)
+	simulatePanic = true
+	errExpectedTest(T, s, 0, 1)	
+}
+
+func TestSchemaErrorRollbackInDefChange(T *testing.T) {
+
+	s:=setup(T)
+	simulateError = true
+	errExpectedTest(T, s, 0, 1)	
+}
+
+func setupAfterMigration(T *testing.T, n int) *Schema {
+	s:=setup(T)
+	err := s.Run(myMigrations.All(), 0, n)
+	if err!=nil {
+		T.Fatalf("Failed to setup for Panic in Data Move test", err)
+	}
+	return s
+}
+
+func TestSchemaPanicRollbackInDataMove(T *testing.T) {
+	s:=setupAfterMigration(T, 1)
+	simulatePanic = true
+	errExpectedTest(T, s, 1, 2)	
+}
+
+func TestSchemaErrorRollbackInDataMove(T *testing.T) {
+
+	s:=setupAfterMigration(T, 1)
+	simulateError = true
+	errExpectedTest(T, s, 1, 2)	
+}
+
+func errExpectedTest(T *testing.T, s *Schema, from int, to int) {	
+	err := s.Run(myMigrations.All(), from, to)
+	if err == nil {
+		T.Fatalf("expected to get a failure in migration")
+	}
+
+	//the migration is already closed by here
+	if s.m!=nil {
+		T.Fatalf("Expected the close method to already be called")
+	}
+
+	//have to reconnect
+	m,err:=GetMigration()
+	if err != nil {
+		T.Fatalf("Error trying to reconnect to database %v", err)
+	}
+		
+	s=NewSchema(m)	
+	//
+	// DB CONFIRMATION OF no tables created
+	//
+	confirmTableDoesntExist(T, s, "Article_migration1")
+	confirmTableDoesntExist(T, s, "Article_migration2")
+	confirmTableDoesntExist(T, s, "Article")
+
 }
 
 func confirmTableDoesntExist(T *testing.T, s *Schema, name string) {
@@ -240,13 +322,8 @@ func createRowAtMigration1(T *testing.T, author, content string, s *Schema) {
 
 func TestSchemaDataSimple(T *testing.T) {
 
-	m:=setup(T)
-	s := NewSchema(m)
+	s:=setup(T)
 
-	//
-	// TEST SETUP
-	//
-	m.DropTableByName(StructNameToTableName("Article")) 
 	err := s.Run(myMigrations.All(), 0, 1)
 	if err != nil {
 		T.Fatalf("failed trying the 0th migration: " + err.Error())
@@ -273,6 +350,7 @@ func TestSchemaDataSimple(T *testing.T) {
 	confirmTableDoesntExist(T, s, "Article_migration2")
 	confirmTableExists(T, s, "Article")
 
+	//check can read content that was changed over
 	_, err = s.m.db.Query(fmt.Sprintf("select %s, %s from %s", 
 		FieldNameToColumnName("Author"), FieldNameToColumnName("Content"),
 		StructNameToTableName("Article")))
@@ -281,5 +359,5 @@ func TestSchemaDataSimple(T *testing.T) {
 		T.Fatalf("error trying to find Article content %s", err)
 	}
 
-	m.Close()	
+	s.Close()	
 }

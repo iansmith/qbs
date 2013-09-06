@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"errors"
 )
 
 //ReversibleMigration is an interface that allows the creation, deletion, and modification
@@ -203,17 +204,28 @@ func (self *Schema) flipOver() {
 	self.prev = tmp
 }
 
-func (self *Schema) Run(info []ReversibleMigration, from int, to int) error {
+func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) {
+	
 	if from == to {
 		return nil
 	}
 
 	self.m.Begin()
 
+	defer func() {
+		if x:=recover(); x!=nil {
+			self.untrapNewColumnsForSqlite3()
+			self.m.Rollback()
+			self.	Close()
+			e = errors.New(fmt.Sprintf("%v",x))			
+		}
+	}()
+	
 	if from < to {
 		for i := from; i < to; i++ {
 			if err := self.migrate(info[i], false); err != nil {
 				self.m.Rollback()
+				self.Close()
 				return err
 			}
 		}
@@ -221,6 +233,7 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) error {
 		for i := from - 1; i >= to; i-- {
 			if err := self.migrate(info[i], true); err != nil {
 				self.m.Rollback()
+				self.Close()
 				return err
 			}
 		}
@@ -362,6 +375,10 @@ func (self *Schema) Save(logicalName string, curr interface{}) (int64, error) {
 	return res, nil
 }
 
+func (self *Schema) Close() {
+	self.m.Close()
+	self.m = nil
+}
 func (self *Schema) trapNewColumnsForSqlite3() {
 	self.oldFieldNameToColumnName = FieldNameToColumnName
 	v:=func(s string) string {
@@ -374,5 +391,8 @@ func (self *Schema) trapNewColumnsForSqlite3() {
 }
 
 func (self *Schema) untrapNewColumnsForSqlite3() {
-	FieldNameToColumnName = self.oldFieldNameToColumnName
+	if self.oldFieldNameToColumnName !=nil {
+		FieldNameToColumnName = self.oldFieldNameToColumnName
+		self.oldFieldNameToColumnName = nil
+	}
 }
