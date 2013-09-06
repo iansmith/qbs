@@ -49,6 +49,8 @@ type Dialect interface {
 	primaryKeySql(isString bool, size int) string
 
 	catchMigrationError(err error) bool
+
+	renameTableSql(oldname, newname string) string
 }
 
 type DataSourceName struct {

@@ -403,7 +403,7 @@ func (q *Qbs) prepare(query string) (stmt *sql.Stmt, err error) {
 	if q.tx != nil {
 		stmt, ok = q.txStmtMap[query]
 		if ok {
-			return
+			return	
 		}
 		stmt, err = q.tx.Prepare(query)
 		if err != nil {

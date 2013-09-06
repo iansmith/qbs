@@ -1,10 +1,11 @@
 package qbs
 
 import (
-		"time"
-	"testing"
-	"strings"
 	_ "github.com/mattn/go-sqlite3"
+	"strings"
+	"testing"
+	"time"
+	"fmt"
 )
 
 /**
@@ -43,8 +44,8 @@ type Article_migration2 struct {
 	Author      string `qbs:"size:127"`
 	Content_old string `qbs:"size:255"`
 	Content_new string
-	Created     time.Time
-	Updated     time.Time
+	Created_new time.Time `qbs:"created"`
+	Updated_new time.Time `qbs:"updated"`
 }
 
 /**
@@ -62,7 +63,7 @@ type Article_migration3 struct {
 
 type User_migration3 User
 
-var myMigrations = SimpleMigrationList {
+var myMigrations = SimpleMigrationList{
 	/* one */
 	&SimpleMigration{
 		Migrate1_AddArticleTable, nil,
@@ -86,40 +87,50 @@ func Migrate2_ChangeContent(m *Schema) error {
 }
 
 /**
-  * We have move the data between "Content" columns in the old and new version because the
-  * the type of the column changed.
-  */
+ * We have move the data between the two versions of the Content column.
+ */
 func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error) {
-	var prev []*Article_migration2
-	if err := m.FindAll("Article", &prev); err != nil {
+
+	var err error
+
+ 	raw, err := m.FindAll("Article"); 
+ 	if err != nil {
 		return 0, err
 	}
-	for _, row := range prev {
-		var newrow Article_migration2
-		newrow = *row
-		if reverse {
-			newrow.Content_old = row.Content_new
-		} else {
-			newrow.Content_new = row.Content_old
+	
+	
+	if reverse {
+		allRows := raw.(*[]*Article_migration2)
+		for _, newRow := range *allRows {
+			oldRow := &Article_migration1{Content: newRow.Content_new, Author: newRow.Author} 
+			if _, err = m.Save("Article", oldRow); err!=nil {
+				return 0, err
+			}
 		}
-		if _, err := m.Save("Article", newrow); err != nil {
+		return len(*allRows),nil
+	}
+	allRows := raw.(*[]*Article_migration1)
+	for _, oldRow := range *allRows {
+		newRow := &Article_migration2{Content_new: oldRow.Content, 
+			Author: oldRow.Author, Content_old: "fart"} 
+		if _, err = m.Save("Article", newRow); err!=nil {
 			return 0, err
 		}
 	}
-	return len(prev), nil
+	return len(*allRows), nil
 }
 
 func Migrate3_ConvertAuthorToUser(m *Schema) error {
-	if err := m.ChangeTable("Article", &Article_migration2{}, &Article_migration3{}); err != nil {
+		if err := m.ChangeTable("Article", &Article_migration2{}, &Article_migration3{}); err != nil {
 		return err
 	}
 	return m.ChangeTable("User", nil, &User_migration3{})
 }
 
-/** 
-  * Convenience func for mapping a string to a first name and last name
-  * in our User struct.
-  */
+/**
+ * Convenience func for mapping a string to a first name and last name
+ * in our User struct.
+ */
 func authorToUser(row *Article_migration3) *User_migration3 {
 
 	u := &User_migration3{}
@@ -130,11 +141,11 @@ func authorToUser(row *Article_migration3) *User_migration3 {
 }
 
 /**
-  * This migration requires us to pull out the user into a separate table
-  * make the Article point to it.
-  */
+ * This migration requires us to pull out the user into a separate table
+ * make the Article point to it.
+ */
 func Migrate3_MoveAuthor(m *Schema, haveDropCol bool, reverse bool) (int, error) {
-	var prev []*Article_migration3
+	/*var prev []*Article_migration3
 	if err := m.FindAll("Article", &prev); err != nil {
 		return 0, err
 	}
@@ -152,48 +163,123 @@ func Migrate3_MoveAuthor(m *Schema, haveDropCol bool, reverse bool) (int, error)
 			u.Id = uid
 			newrow.AuthorId_new = u.Id
 			tmp := User(*u)
-			newrow.Author_new = &tmp 	
+			newrow.Author_new = &tmp
 		}
 		if _, err := m.Save("Author", newrow); err != nil {
 			return 0, err
 		}
 	}
-	return len(prev), nil
-}	
+	return len(prev), nil*/
+	return 0,nil
+}
 
-func TestSchemaBasic(T *testing.T) {
+func setup(T *testing.T) *Migration{
+
 	RegisterSqlite3("/tmp/bletch.db")
 	m, err := GetMigration()
-	if err!=nil {
+	if err != nil {
 		T.Fatalf("unable to get the database connection open: %s", err)
 	}
 	m.Log = true
-	
-	m.DropTable(&Article_migration1{}) //test setup	
-	
-	s := NewSchema(m)
+	return m
+}
 
-	err=s.Run(myMigrations.All(), 0, 1)
-	if err!=nil {
-		T.Fatalf("failed trying the 0th migration: "+err.Error())
-	}
+func TestSchemaCreateBasic(T *testing.T) {
+
+	m:=setup(T)
+	s := NewSchema(m)
 	
-	_, err =s.m.db.Exec("select Id from Article_migration1")
-	if err==nil {
+	//
+	// TEST PREP
+	//
+	m.DropTableByName(StructNameToTableName("Article")) 
+
+
+	//
+	// CODE UNDER TEST
+	//
+	err := s.Run(myMigrations.All(), 0, 1)
+	if err != nil {
+		T.Fatalf("failed trying the 0th migration: " + err.Error())
+	}
+
+	//
+	// DB CONFIRMATION OF TABLES CREATED/NOT CREATED
+	//
+	confirmTableDoesntExist(T, s, "Article_migration1")
+	confirmTableDoesntExist(T, s, "Article_migration2")
+	confirmTableExists(T, s, "Article")
+}
+
+func confirmTableDoesntExist(T *testing.T, s *Schema, name string) {
+	_, err := s.m.db.Query("select ? from ?", FieldNameToColumnName("Id"),
+		StructNameToTableName(name))
+	if err == nil {
 		T.Fatalf("did not expect to be able to find Article_migration1")
 	}
+}
 
-	result, err := s.m.db	.Exec("select Id from Article")
-	if err!=nil {
+func confirmTableExists(T *testing.T, s *Schema, name string) {
+	_, err := s.m.db.Query(fmt.Sprintf("select %s from %s", FieldNameToColumnName("Id"),
+		StructNameToTableName(name)))
+	if err != nil {
 		T.Fatalf("expected to be able to find Article %s", err)
 	}
-	r, err := result.RowsAffected()
+}
+
+func createRowAtMigration1(T *testing.T, author, content string, s *Schema) {
+	sql:=fmt.Sprintf("insert into %s (%s, %s) values (\"%s\", \"%s\")",
+		 StructNameToTableName("Article"), FieldNameToColumnName("Author"),
+		 FieldNameToColumnName("Content"), author, content)	
+
+	_, err:= s.m.db.Exec(sql)
 	if err!=nil {
-		T.Fatalf("rows affected failed, %s", err)
+		T.Fatalf("failed trying to insert row (%s,%s): %s", author, content, err)
+	}
+}
+
+func TestSchemaDataSimple(T *testing.T) {
+
+	m:=setup(T)
+	s := NewSchema(m)
+
+	//
+	// TEST SETUP
+	//
+	m.DropTableByName(StructNameToTableName("Article")) 
+	err := s.Run(myMigrations.All(), 0, 1)
+	if err != nil {
+		T.Fatalf("failed trying the 0th migration: " + err.Error())
 	}
 	
-	if r!=0 {
-		T.Fatalf("unexpected number of rows in query result, expected 0 but got %d", result.RowsAffected)
-	}	
-	
-}		
+	createRowAtMigration1(T, "Dick Cheney", "The Presidency", s)
+	createRowAtMigration1(T, 	"David Maurer", "The Big Con", s)
+
+	//
+	// TEST
+	//		 
+	err = s.Run(myMigrations.All(), 1, 2)
+	if err != nil {
+		T.Fatalf("failed trying the migration 1: " + err.Error())
+	}
+
+	//
+	// CHECK DATA OK AFTER
+	//	
+	//
+	// DB CONFIRMATION OF TABLE CREATED/NOT CREATED
+	//
+	confirmTableDoesntExist(T, s, "Article_migration1")
+	confirmTableDoesntExist(T, s, "Article_migration2")
+	confirmTableExists(T, s, "Article")
+
+	_, err = s.m.db.Query(fmt.Sprintf("select %s, %s from %s", 
+		FieldNameToColumnName("Author"), FieldNameToColumnName("Content_new"),
+		StructNameToTableName("Article")))
+		
+	if err != nil {
+		T.Fatalf("error trying to find Article content %s", err)
+	}
+
+	m.Close()	
+}

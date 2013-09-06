@@ -307,3 +307,9 @@ func (d base) columnsInTable(mg *Migration, table interface{}) map[string]bool {
 func (d base) catchMigrationError(err error) bool {
 	return false
 }
+
+func (d base) renameTableSql(oldname, newname string) string {
+	o:=d.dialect.quote(oldname)
+	n:=d.dialect.quote(newname)
+	return fmt.Sprintf("ALTER TABLE %s RENAME TO %s", o, n)
+}
