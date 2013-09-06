@@ -274,7 +274,7 @@ func TestSchemaDataSimple(T *testing.T) {
 	confirmTableExists(T, s, "Article")
 
 	_, err = s.m.db.Query(fmt.Sprintf("select %s, %s from %s", 
-		FieldNameToColumnName("Author"), FieldNameToColumnName("Content_new"),
+		FieldNameToColumnName("Author"), FieldNameToColumnName("Content"),
 		StructNameToTableName("Article")))
 		
 	if err != nil {

@@ -35,7 +35,7 @@ func (mg *Migration) GetQbsSameTransaction() *Qbs {
 }
 
 func (mg *Migration) HasColumnOperations() bool {
-	_, ok := mg.dialect.(sqlite3)
+	_, ok := mg.dialect.(*sqlite3)
 	return !ok
 }
 
@@ -191,7 +191,7 @@ func (mg *Migration) AddColumn(structPtr interface{}, name string) error {
 
 func (mg *Migration) addColumn(table string, column *modelField) {
 	sql := mg.dialect.addColumnSql(table, column.name, column.value, column.size)
-	if mg.Log {
+		if mg.Log {
 		fmt.Println(sql)
 	}
 	_, err := mg.db.Exec(sql)

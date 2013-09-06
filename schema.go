@@ -77,6 +77,7 @@ type Schema struct {
 	curr                      map[string]*nameStructPair
 	m                         *Migration
 	state                     nameOp
+	oldFieldNameToColumnName  func (string)string
 }
 
 func NewBaseSchema() *BaseSchema {
@@ -87,10 +88,6 @@ func NewSchema(m *Migration) *Schema {
 	result := &Schema{m: m, prev: make(map[string]*nameStructPair),
 		curr: make(map[string]*nameStructPair)}
 	return result
-}
-
-func (self *Schema) Log(query string, args... interface{}) {
-	self.m.log(query,args...)
 }
 
 func (self *Schema) toLogicalName(s string, current bool) string {
@@ -151,6 +148,10 @@ func (self *Schema) migrate(info ReversibleMigration, reverse bool) error {
 		self.flipOver()
 	}
 
+	if !self.m.HasColumnOperations() {
+		self.trapNewColumnsForSqlite3()
+	}
+
 	//move logical names to a temp name
 	self.renameCurrentTablesAddColumns(reverse)
 
@@ -162,12 +163,17 @@ func (self *Schema) migrate(info ReversibleMigration, reverse bool) error {
 	if err:=self.removeOldRenameColumns(); err!=nil {
 		return err
 	}
+
+	if !self.m.HasColumnOperations() {
+		self.untrapNewColumnsForSqlite3()
+	}
 	
 	if count>0 {
 		self.m.log(fmt.Sprintf("SUCCESS! Data migration of %d rows\n", count))
 	} else {
 		self.m.log("SUCCESS! Adjust schema successfully")
 	}	
+
 	return nil
 }
 
@@ -236,7 +242,7 @@ func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
 			return err
 		}	
 	}
-	for _, pair := range self.curr {		
+	for _, pair := range self.curr {			
 		//we use this table's name as is and make it empty for use by the data migration
 		if err := self.m.CreateTable("", pair.typeRep.Interface(), 
 				fieldsWithSuffix(pair.typeRep.Interface(), 	"_old")); err != nil {
@@ -354,4 +360,19 @@ func (self *Schema) Save(logicalName string, curr interface{}) (int64, error) {
 		return 0, err
 	}
 	return res, nil
+}
+
+func (self *Schema) trapNewColumnsForSqlite3() {
+	self.oldFieldNameToColumnName = FieldNameToColumnName
+	v:=func(s string) string {
+		if strings.HasSuffix(s, "_new") {
+			return self.oldFieldNameToColumnName(s[0:len(s)-4])
+		}
+		return self.oldFieldNameToColumnName(s)
+	}
+	FieldNameToColumnName = v
+}
+
+func (self *Schema) untrapNewColumnsForSqlite3() {
+	FieldNameToColumnName = self.oldFieldNameToColumnName
 }
