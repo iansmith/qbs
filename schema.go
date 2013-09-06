@@ -151,11 +151,6 @@ func (self *Schema) migrate(info ReversibleMigration, reverse bool) error {
 		self.flipOver()
 	}
 
-	//are there any tables that need to be constructed from scratch?
-	if err := self.createCurrent(); err != nil {
-		return err
-	}
-
 	//move logical names to a temp name
 	self.renameCurrentTablesAddColumns(reverse)
 
@@ -181,10 +176,6 @@ func (self *Schema) removeOldRenameColumns() error {
 			self.m.DropTable(pair.typeRep.Interface())
 		}
 		for logicalName, pair := range self.curr {
-			_, inBoth := self.prev[logicalName]
-			if !inBoth { 
-				continue
-			}
 			//move this new version into place
 			newName := StructNameToTableName(logicalName)
 			oldName := StructNameToTableName(pair.name)
@@ -193,26 +184,6 @@ func (self *Schema) removeOldRenameColumns() error {
 			}				
 		}
 		return nil
-}
-
-func (self *Schema) createCurrent() error {
-	self.state = SAVING
-
-	for name, pair := range self.curr {
-		_, present := self.prev[name]
-		if present {
-			continue
-		}
-
-		//no need to worry about any "new" or "old" beause creating from
-		//scratch implies that the state is ok
-		n:= pair.typeRep.Elem().Type().Name()
-		if err := self.m.CreateTable(self.toLogicalName(n, true), pair.typeRep.Interface(),
-					nil); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (self *Schema) clear() {
@@ -265,12 +236,7 @@ func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
 			return err
 		}	
 	}
-	for logicalName, pair := range self.curr {
-		_, in_both := self.prev[logicalName]
-		if !in_both {
-			continue
-		}
-		
+	for _, pair := range self.curr {		
 		//we use this table's name as is and make it empty for use by the data migration
 		if err := self.m.CreateTable("", pair.typeRep.Interface(), 
 				fieldsWithSuffix(pair.typeRep.Interface(), 	"_old")); err != nil {
