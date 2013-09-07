@@ -79,11 +79,9 @@ type Schema struct {
 	prev                      map[string]*nameStructPair
 	curr                      map[string]*nameStructPair
 	m                         *Migration
-	state                     nameOp
 	oldFieldNameToColumnName  func (string)string
 	oldColumnNameToFieldName  func (string)string	
 	reverse                   map[string]string
-	goingForward              bool
 }
 
 func NewBaseSchema() *BaseSchema {
@@ -94,31 +92,6 @@ func NewSchema(m *Migration) *Schema {
 	result := &Schema{m: m, prev: make(map[string]*nameStructPair),
 		curr: make(map[string]*nameStructPair)}
 	return result
-}
-
-func (self *Schema) toLogicalName(s string, current bool) string {
-	ref := self.curr
-	if !current {
-		ref = self.prev
-	}
-	logicalName := ""
-
-	if self.state==FINDING {
-		fmt.Printf("ignoring logical name because we have done the renaming\n")
-	}
-
-	//this search is ok because the number of tables is small
-	for candidate, pair := range ref {
-		if pair.name != s {
-			continue
-		}
-		logicalName = candidate
-		break
-	}
-	if logicalName == "" {
-		panic("can't understand true name " + s)
-	}
-	return logicalName
 }
 
 //ParseMigrationFlag is a convenience to help those writing migrations.  It
@@ -218,7 +191,6 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 	}()
 	
 	if from < to {
-		self.goingForward = true
 		for i := from; i < to; i++ {
 			if err := self.migrate(info[i], false); err != nil {
 				self.m.Rollback()
@@ -227,7 +199,6 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 			}
 		}
 	} else {
-		self.goingForward = false
 		for i := from - 1; i >= to; i-- {
 			if err := self.migrate(info[i], true); err != nil {
 				self.m.Rollback()
@@ -375,7 +346,6 @@ func (self *Schema) FindAll(logicalName string) (interface{}, error) {
 }
 
 func (self *Schema) Save(logicalName string, curr interface{}) (int64, error) {
-	self.state = SAVING
 	self.checkLogicalName(logicalName, curr)
 	q := self.m.GetQbsSameTransaction()
 		q.OmitFields(fieldsWithSuffix(curr, 	OLD)...)
