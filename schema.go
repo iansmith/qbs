@@ -61,6 +61,8 @@ const (
 	FINDING nameOp = iota
 	SAVING
 
+	OLD="OLD"
+	NEW="NEW"
 )
 
 type BaseSchema struct {
@@ -79,6 +81,9 @@ type Schema struct {
 	m                         *Migration
 	state                     nameOp
 	oldFieldNameToColumnName  func (string)string
+	oldColumnNameToFieldName  func (string)string	
+	reverse                   map[string]string
+	goingForward              bool
 }
 
 func NewBaseSchema() *BaseSchema {
@@ -100,7 +105,6 @@ func (self *Schema) toLogicalName(s string, current bool) string {
 
 	if self.state==FINDING {
 		fmt.Printf("ignoring logical name because we have done the renaming\n")
-		
 	}
 
 	//this search is ok because the number of tables is small
@@ -144,13 +148,9 @@ func (self *Schema) migrate(info ReversibleMigration, reverse bool) error {
 	if err := info.Structure(self); err != nil {
 		return err
 	}
-
+	
 	if reverse {
 		self.flipOver()
-	}
-
-	if !self.m.HasColumnOperations() {
-		self.trapNewColumnsForSqlite3()
 	}
 
 	//move logical names to a temp name
@@ -164,15 +164,11 @@ func (self *Schema) migrate(info ReversibleMigration, reverse bool) error {
 	if err:=self.removeOldRenameColumns(); err!=nil {
 		return err
 	}
-
-	if !self.m.HasColumnOperations() {
-		self.untrapNewColumnsForSqlite3()
-	}
 	
 	if count>0 {
 		self.m.log(fmt.Sprintf("SUCCESS! Data migration of %d rows\n", count))
 	} else {
-		self.m.log("SUCCESS! Adjust schema successfully")
+		self.m.log("SUCCESS! Adjusted schema successfully")
 	}	
 
 	return nil
@@ -214,7 +210,7 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 
 	defer func() {
 		if x:=recover(); x!=nil {
-			self.untrapNewColumnsForSqlite3()
+			self.untrapColumnsForSqlite3()
 			self.m.Rollback()
 			self.	Close()
 			e = errors.New(fmt.Sprintf("%v",x))			
@@ -222,6 +218,7 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 	}()
 	
 	if from < to {
+		self.goingForward = true
 		for i := from; i < to; i++ {
 			if err := self.migrate(info[i], false); err != nil {
 				self.m.Rollback()
@@ -230,6 +227,7 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 			}
 		}
 	} else {
+		self.goingForward = false
 		for i := from - 1; i >= to; i-- {
 			if err := self.migrate(info[i], true); err != nil {
 				self.m.Rollback()
@@ -243,6 +241,9 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 }
 
 func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
+	suffix := OLD
+	trap := NEW
+		
 	for logicalName, pair := range self.prev {
 		_, in_both := self.curr[logicalName]
 		if !in_both {
@@ -256,9 +257,13 @@ func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
 		}	
 	}
 	for _, pair := range self.curr {			
-		//we use this table's name as is and make it empty for use by the data migration
-		if err := self.m.CreateTable("", pair.typeRep.Interface(), 
-				fieldsWithSuffix(pair.typeRep.Interface(), 	"_old")); err != nil {
+		//we use this table's name as is and make it empty f	or use by the data migration
+		self.trapColumnsForSqlite3(trap)
+		err := self.m.CreateTable("", pair.typeRep.Interface(), 
+				fieldsWithSuffix(pair.typeRep.Interface(), 	suffix)); 		
+		self.untrapColumnsForSqlite3()
+				
+		if err != nil {
 			return err
 		}
 	}
@@ -349,12 +354,19 @@ func (self *Schema) checkLogicalName(logical string, i interface{}) {
 func (self *Schema) FindAll(logicalName string) (interface{}, error) {
 	q := self.m.GetQbsSameTransaction()
 	pair := self.prev[logicalName]	
+
 	sliceVal := reflect.MakeSlice(reflect.SliceOf(pair.typeRep.Type()	)	, 0, 0)
 	
 	ptrForSet := reflect.New(reflect.SliceOf(pair.typeRep.Type()))
 	reflect.Indirect(ptrForSet).Set(sliceVal)
+
 	
+		self.trapColumnsForSqlite3(NEW)
+		q.OmitFields(fieldsWithSuffix(pair.typeRep.Interface(), 	OLD)...)
+
 	err := q.FindAll(ptrForSet.Interface()	)
+	self.untrapColumnsForSqlite3()
+	
 	if err != nil {
 		self.m.Rollback()
 		return nil, err
@@ -366,8 +378,12 @@ func (self *Schema) Save(logicalName string, curr interface{}) (int64, error) {
 	self.state = SAVING
 	self.checkLogicalName(logicalName, curr)
 	q := self.m.GetQbsSameTransaction()
-	q.OmitFields(fieldsWithSuffix(curr, 	"_old")...)
+		q.OmitFields(fieldsWithSuffix(curr, 	OLD)...)
+		self.trapColumnsForSqlite3(NEW)
+			
 	res, err := q.Save(curr)
+	self.untrapColumnsForSqlite3()
+	
 	if err != nil {
 		self.m.Rollback()
 		return 0, err
@@ -379,20 +395,38 @@ func (self *Schema) Close() {
 	self.m.Close()
 	self.m = nil
 }
-func (self *Schema) trapNewColumnsForSqlite3() {
+func (self *Schema) trapColumnsForSqlite3(suffix string) {
 	self.oldFieldNameToColumnName = FieldNameToColumnName
+	self.oldColumnNameToFieldName = ColumnNameToFieldName
+	self.reverse = make(map[string]string)
+	
 	v:=func(s string) string {
-		if strings.HasSuffix(s, "_new") {
-			return self.oldFieldNameToColumnName(s[0:len(s)-4])
+		if strings.HasSuffix(s, suffix) {
+			t := s[0: len(s)-len(suffix)]
+			self.reverse[self.oldFieldNameToColumnName(t)]=
+				strings.ToLower(s[0:1])+s[1:len(s)]
+			return self.oldFieldNameToColumnName(t)
 		}
 		return self.oldFieldNameToColumnName(s)
 	}
 	FieldNameToColumnName = v
+	v=func(s string) string {
+		t, ok:=self.reverse[s]
+		if ok {
+			return self.oldColumnNameToFieldName(t)
+		}
+		return self.oldColumnNameToFieldName(s)
+	}
+	ColumnNameToFieldName = v
 }
 
-func (self *Schema) untrapNewColumnsForSqlite3() {
+func (self *Schema) untrapColumnsForSqlite3() {
 	if self.oldFieldNameToColumnName !=nil {
 		FieldNameToColumnName = self.oldFieldNameToColumnName
 		self.oldFieldNameToColumnName = nil
+	}
+	if self.oldColumnNameToFieldName !=nil {
+		ColumnNameToFieldName = self.oldColumnNameToFieldName
+		self.oldColumnNameToFieldName = nil
 	}
 }

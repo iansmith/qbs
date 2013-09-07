@@ -207,7 +207,7 @@ func (mg *Migration) RenameTable(oldname, newname string) error {
 	if mg.tx!=nil {
 		_, err:=mg.tx.Exec(sql)
 		return err
-	}
+	}		
 	_, err:=mg.db.Exec(sql)
 	return err
 }

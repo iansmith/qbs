@@ -43,10 +43,10 @@ type Article_migration1 struct {
 type Article_migration2 struct {
 	Id          int64
 	Author      string `qbs:"size:127"`
-	Content_old string `qbs:"size:255"`
-	Content_new string
-	Created_new time.Time `qbs:"created"`
-	Updated_new time.Time `qbs:"updated"`
+	ContentOLD string `qbs:"size:255"`
+	ContentNEW string
+	CreatedNEW time.Time `qbs:"created"`
+	UpdatedNEW time.Time `qbs:"updated"`
 }
 
 /**
@@ -54,9 +54,9 @@ type Article_migration2 struct {
  */
 type Article_migration3 struct {
 	Id           int64
-	Author_old   string `qbs:"size:127"`
-	AuthorId_new int64
-	Author_new   *User
+	AuthorOLD   string `qbs:"size:127"`
+	AuthorIdNEW int64
+	AuthorNEW   *User
 	Content      string
 	Created      time.Time
 	Updated      time.Time
@@ -82,8 +82,7 @@ var myMigrations = SimpleMigrationList{
 func Migrate1_AddArticleTable(m *Schema) error {
 	if simulatePanic {
 		panic("simulated to check transactions")
-	}
-	
+	}	
 	if simulateError {
 		return errors.New("simulated to check transactions")
 	}
@@ -97,6 +96,12 @@ func Migrate2_ChangeContent(m *Schema) error {
 // used for testing
 var simulatePanic bool
 var simulateError bool
+
+const (
+	cheney = "Dick Cheney"
+	veep = "The Vice Presidency"
+	prez = "The Presidency"
+)
 
 /**
  * We have move the data between the two versions of the Content column.
@@ -121,7 +126,13 @@ func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error
 	if reverse {
 		allRows := raw.(*[]*Article_migration2)
 		for _, newRow := range *allRows {
-			oldRow := &Article_migration1{Content: newRow.Content_new, Author: newRow.Author} 
+			var oldRow *Article_migration1
+			//semantic change on the name of the book between v1 and v2
+			if newRow.ContentNEW==prez && newRow.Author==cheney {
+				oldRow =&Article_migration1{Content: veep, Author: cheney}		
+			} else {
+				oldRow = &Article_migration1{Content: newRow.ContentNEW, Author: newRow.Author} 
+			}
 			if _, err = m.Save("Article", oldRow); err!=nil {
 				return 0, err
 			}
@@ -130,8 +141,14 @@ func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error
 	}
 	allRows := raw.(*[]*Article_migration1)
 	for _, oldRow := range *allRows {
-		newRow := &Article_migration2{Content_new: oldRow.Content, 
-			Author: oldRow.Author, Content_old: "fart"} 
+		var newRow *Article_migration2
+		//semantic change on the name of the book between v1 and v2
+		if oldRow.Content==veep && oldRow.Author==cheney {
+			newRow = &Article_migration2{ContentNEW: prez, Author: cheney}
+		} else {
+			newRow = &Article_migration2{ContentNEW: oldRow.Content, 
+				Author: oldRow.Author} 
+		}
 		if _, err = m.Save("Article", newRow); err!=nil {
 			return 0, err
 		}
@@ -153,7 +170,7 @@ func Migrate3_ConvertAuthorToUser(m *Schema) error {
 func authorToUser(row *Article_migration3) *User_migration3 {
 
 	u := &User_migration3{}
-	s := strings.SplitN(row.Author_old, " ", 2)
+	s := strings.SplitN(row.AuthorOLD, " ", 2)
 	u.FirstName = s[0]
 	u.LastName = s[1]
 	return u
@@ -283,20 +300,14 @@ func errExpectedTest(T *testing.T, s *Schema, from int, to int) {
 		T.Fatalf("Error trying to reconnect to database %v", err)
 	}
 		
-	s=NewSchema(m)	
-	//
-	// DB CONFIRMATION OF no tables created
-	//
-	confirmTableDoesntExist(T, s, "Article_migration1")
-	confirmTableDoesntExist(T, s, "Article_migration2")
-	confirmTableDoesntExist(T, s, "Article")
-
+		s=NewSchema(m)	
+	confirmNoTables(T, s)
 }
 
 func confirmTableDoesntExist(T *testing.T, s *Schema, name string) {
 	_, err := s.m.db.Query("select ? from ?", FieldNameToColumnName("Id"),
 		StructNameToTableName(name))
-	if err == nil {
+		if err == nil {
 		T.Fatalf("did not expect to be able to find Article_migration1")
 	}
 }
@@ -320,6 +331,34 @@ func createRowAtMigration1(T *testing.T, author, content string, s *Schema) {
 	}
 }
 
+func confirmNoTables(T *testing.T, s *Schema) {
+	confirmTableDoesntExist(T, s, "Article_migration1")
+	confirmTableDoesntExist(T, s, "Article_migration2")
+	confirmTableDoesntExist(T, s, "Article")
+}
+
+func TestSchemaReversalToZero(T *testing.T) {
+	s:=setupAfterMigration(T, 1)
+	createRowAtMigration1(T, 	"Joe Blow", "Some book", s)
+	createRowAtMigration1(T, cheney, veep, s)
+	s.Run(myMigrations.All(), 1, 2)
+	title:=confirmCanReadContent(T,s)
+	if title!=prez{
+		T.Fatalf("Bad title on book after reversal: %s", title)
+	}
+
+	//
+	//now reverse
+	//	
+	s.Run(myMigrations.All(), 2, 1)
+	title=confirmCanReadContent(T,s)
+	if title!=veep {
+		T.Fatalf("Bad title on book after reversal: %s", title)
+	}
+	s.Run(myMigrations.All(), 1, 0)	
+	confirmNoTables(T, s)
+}
+
 func TestSchemaDataSimple(T *testing.T) {
 
 	s:=setup(T)
@@ -329,7 +368,7 @@ func TestSchemaDataSimple(T *testing.T) {
 		T.Fatalf("failed trying the 0th migration: " + err.Error())
 	}
 	
-	createRowAtMigration1(T, "Dick Cheney", "The Presidency", s)
+	createRowAtMigration1(T, cheney, veep, s)
 	createRowAtMigration1(T, 	"David Maurer", "The Big Con", s)
 
 	//
@@ -350,14 +389,35 @@ func TestSchemaDataSimple(T *testing.T) {
 	confirmTableDoesntExist(T, s, "Article_migration2")
 	confirmTableExists(T, s, "Article")
 
-	//check can read content that was changed over
-	_, err = s.m.db.Query(fmt.Sprintf("select %s, %s from %s", 
-		FieldNameToColumnName("Author"), FieldNameToColumnName("Content"),
-		StructNameToTableName("Article")))
-		
-	if err != nil {
-		T.Fatalf("error trying to find Article content %s", err)
+	title:=confirmCanReadContent(T, s)
+	if title!=prez {
+		T.Fatalf("Book in wrong state: %s", title)
 	}
-
+	
 	s.Close()	
+}
+
+func confirmCanReadContent(T *testing.T, s *Schema) string {
+	//check can read content that was changed over
+	rows, err := s.m.db.Query(
+		fmt.Sprintf("select %s from %s where author = \"Dick Cheney\"", 
+			FieldNameToColumnName("Content"),
+			StructNameToTableName("Article")))
+		
+	if err!=nil {
+		T.Fatalf("Expected to be able to read from Article table: %v", err)
+	}
+	
+	if !rows.Next() {
+		T.Fatalf("can't find Dick Cheney's book")
+	}
+	var result string
+	err=rows.Scan(&result)
+	if err!=nil {
+		T.Fatalf("Error scanning for book title: %v\n", err)
+	}
+	if rows.Next() {
+		T.Fatalf("found too many books by Dick Cheney")
+	}
+	return result
 }
