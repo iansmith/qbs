@@ -55,15 +55,22 @@ type Article_migration2 struct {
 type Article_migration3 struct {
 	Id           int64
 	AuthorOLD   string `qbs:"size:127"`
-	AuthorIdNEW int64
-	AuthorNEW   *User
+	AuthorIdNEW int64 `qbs:"fk:AuthorNEW"`
+	AuthorNEW   *User_migration3 `qbs:"join:AuthorNEW"`
 	Content      string
 	Created      time.Time
 	Updated      time.Time
 }
 
-type User_migration3 User
+/**
+  * User migration3 is the same at user for the
+  * moment.
+  */
+type User_migration3 User;
 
+/**
+  * List of migrations.
+  */
 var myMigrations = SimpleMigrationList{
 	/* one */
 	&SimpleMigration{
@@ -79,6 +86,9 @@ var myMigrations = SimpleMigrationList{
 	},
 }
 
+/**
+  * Create the article table
+  */
 func Migrate1_AddArticleTable(m *Schema) error {
 	if simulatePanic {
 		panic("simulated to check transactions")
@@ -89,6 +99,9 @@ func Migrate1_AddArticleTable(m *Schema) error {
 	return m.ChangeTable("Article", nil, &Article_migration1{})
 }
 
+/**
+  * Register a change from migration 1 to 2 
+  */
 func Migrate2_ChangeContent(m *Schema) error {
 	return m.ChangeTable("Article", &Article_migration1{}, &Article_migration2{})
 }
@@ -106,7 +119,7 @@ const (
 /**
  * We have move the data between the two versions of the Content column.
  */
-func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error) {
+func Migrate2_MoveContent(m *Schema, haveColumnOps bool, reverse bool) (int, error) {
 
 	var err error
 
@@ -156,23 +169,28 @@ func Migrate2_MoveContent(m *Schema, haveDropCol bool, reverse bool) (int, error
 	return len(*allRows), nil
 }
 
+/**
+  * Register a change between migration 2 and 3 of article, plus
+  * create the new User table.
+  */
 func Migrate3_ConvertAuthorToUser(m *Schema) error {
-		if err := m.ChangeTable("Article", &Article_migration2{}, &Article_migration3{}); err != nil {
+	// NOTE: Child tables must come before parent tables
+	if err := m.ChangeTable("User", nil, &User_migration3{}); err != nil {
 		return err
-	}
-	return m.ChangeTable("User", nil, &User_migration3{})
+	}	
+	return m.ChangeTable("Article", &Article_migration2{}, &Article_migration3{})
 }
 
 /**
  * Convenience func for mapping a string to a first name and last name
  * in our User struct.
  */
-func authorToUser(row *Article_migration3) *User_migration3 {
-
+func authorToUser(row *Article_migration2) *User_migration3 {
 	u := &User_migration3{}
-	s := strings.SplitN(row.AuthorOLD, " ", 2)
+	s := strings.SplitN(row.Author, " ", 2)
 	u.FirstName = s[0]
 	u.LastName = s[1]
+	u.Email = "example@example.com" //default value
 	return u
 }
 
@@ -181,32 +199,42 @@ func authorToUser(row *Article_migration3) *User_migration3 {
  * make the Article point to it.
  */
 func Migrate3_MoveAuthor(m *Schema, haveDropCol bool, reverse bool) (int, error) {
-	/*var prev []*Article_migration3
-	if err := m.FindAll("Article", &prev); err != nil {
+
+ 	raw, err := m.FindAll("Article"); 
+ 	if err != nil {
 		return 0, err
 	}
-	for _, row := range prev {
-		var newrow Article_migration3
-		newrow = *row
-		if reverse {
-			newrow.Author_old = row.Author_new.FirstName + " " + row.Author_new.LastName
-		} else {
-			u := authorToUser(row)
-			uid, err := m.Save("User", u)
-			if err != nil {
+		
+	if reverse {
+		allRows := raw.(*[]*Article_migration3)
+		for _, newRow := range *allRows {
+			var oldRow *Article_migration2
+			name := newRow.AuthorNEW.FirstName + " "+newRow.AuthorNEW.LastName
+			oldRow = &Article_migration2 { ContentNEW : newRow.Content,
+				CreatedNEW :newRow.Created, Author:name}		
+			//oldRow.UpdatedNEW will be overwritten when we save
+			if _, err := m.Save("Article", oldRow); err != nil {
 				return 0, err
 			}
-			u.Id = uid
-			newrow.AuthorId_new = u.Id
-			tmp := User(*u)
-			newrow.Author_new = &tmp
 		}
-		if _, err := m.Save("Author", newrow); err != nil {
+		return len(*allRows), nil
+	}
+
+	allRows := raw.(*[]*Article_migration2)
+	for _, oldRow := range *allRows {
+		var newrow *Article_migration3
+		u := authorToUser(oldRow)
+		_, err := m.Save("User", u)
+		if err != nil {
+			return 0, err
+		}
+		newrow = &Article_migration3{AuthorIdNEW:u.Id, AuthorNEW: u	, 
+			Content: oldRow.ContentNEW}
+		if _, err := m.Save("Article", newrow); err != nil {
 			return 0, err
 		}
 	}
-	return len(prev), nil*/
-	return 0,nil
+	return len(*allRows), nil
 }
 
 func setup(T *testing.T) *Schema{
@@ -222,6 +250,7 @@ func setup(T *testing.T) *Schema{
 	
 	s:= NewSchema(m)
 	m.DropTableByName(StructNameToTableName("Article")) 
+	m.DropTableByName(StructNameToTableName("User")) 
 	return 	s
 }
 
@@ -335,6 +364,8 @@ func confirmNoTables(T *testing.T, s *Schema) {
 	confirmTableDoesntExist(T, s, "Article_migration1")
 	confirmTableDoesntExist(T, s, "Article_migration2")
 	confirmTableDoesntExist(T, s, "Article")
+	confirmTableDoesntExist(T, s, "User")
+	confirmTableDoesntExist(T, s, "User_migration3")
 }
 
 func TestSchemaReversalToZero(T *testing.T) {
@@ -396,6 +427,37 @@ func TestSchemaDataSimple(T *testing.T) {
 	
 	s.Close()	
 }
+
+func TestSchemaNewUserTable(T *testing.T) {
+	s:=setup(T)
+	err:=s.Run(myMigrations.All(), 0, 1)
+	if err!=nil {
+		T.Fatal("Error running migrations 0->1: %s",err)
+	}
+	createRowAtMigration1(T, cheney, veep, s)
+	createRowAtMigration1(T, 	"Anthony Bourdain", "Kitchen Confidential", s)
+
+	err=s.Run(myMigrations.All(), 1, 3)
+	if err!=nil {
+		T.Fatal("Error running migrations 1->3: %s",err)
+	}
+	
+	err=s.Run(myMigrations.All(), 3, 1)
+	if err!=nil {
+		T.Fatal("Error running migrations 3->1		: %s",err)
+	}
+	
+	if confirmCanReadContent(T, s)!=veep {
+		T.Fatalf("Didn't find correct book by Cheney")
+	}
+
+	err=s.Run(myMigrations.All(), 1, 0)
+	if err!=nil {	
+		T.Fatal("Error running migrations 1->0		: %s",err)
+	}
+	confirmNoTables(T,s)	
+}
+
 
 func confirmCanReadContent(T *testing.T, s *Schema) string {
 	//check can read content that was changed over

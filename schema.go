@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"errors"
+	"runtime/debug"
 )
 
 //ReversibleMigration is an interface that allows the creation, deletion, and modification
@@ -57,9 +58,6 @@ const (
 	//forward direction are desired.  This is often used when moving from
 	//an empty database to "current state."
 	UNLIMITED_MIGRATIONS = 10000
-
-	FINDING nameOp = iota
-	SAVING
 
 	OLD="OLD"
 	NEW="NEW"
@@ -186,6 +184,8 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 			self.untrapColumnsForSqlite3()
 			self.m.Rollback()
 			self.	Close()
+			fmt.Printf("Panic trapped during execution of migrations: %v\n",x)
+			debug.PrintStack()
 			e = errors.New(fmt.Sprintf("%v",x))			
 		}
 	}()
@@ -214,12 +214,8 @@ func (self *Schema) Run(info []ReversibleMigration, from int, to int) (e error) 
 func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
 	suffix := OLD
 	trap := NEW
-		
+
 	for logicalName, pair := range self.prev {
-		_, in_both := self.curr[logicalName]
-		if !in_both {
-			continue
-		}
 		//ok, we need to do the rename to prepare for a data migration
 		oldName := StructNameToTableName(logicalName)
 		newName := StructNameToTableName(pair.name)
@@ -227,13 +223,12 @@ func (self *Schema) renameCurrentTablesAddColumns(reverse bool) error {
 			return err
 		}	
 	}
-	for _, pair := range self.curr {			
+	for _, pair := range self.curr {				
 		//we use this table's name as is and make it empty f	or use by the data migration
 		self.trapColumnsForSqlite3(trap)
 		err := self.m.CreateTable("", pair.typeRep.Interface(), 
 				fieldsWithSuffix(pair.typeRep.Interface(), 	suffix)); 		
 		self.untrapColumnsForSqlite3()
-				
 		if err != nil {
 			return err
 		}
@@ -332,8 +327,8 @@ func (self *Schema) FindAll(logicalName string) (interface{}, error) {
 	reflect.Indirect(ptrForSet).Set(sliceVal)
 
 	
-		self.trapColumnsForSqlite3(NEW)
-		q.OmitFields(fieldsWithSuffix(pair.typeRep.Interface(), 	OLD)...)
+	self.trapColumnsForSqlite3(NEW)
+	q.OmitFields(fieldsWithSuffix(pair.typeRep.Interface(), 	OLD)...)
 
 	err := q.FindAll(ptrForSet.Interface()	)
 	self.untrapColumnsForSqlite3()
@@ -348,9 +343,9 @@ func (self *Schema) FindAll(logicalName string) (interface{}, error) {
 func (self *Schema) Save(logicalName string, curr interface{}) (int64, error) {
 	self.checkLogicalName(logicalName, curr)
 	q := self.m.GetQbsSameTransaction()
-		q.OmitFields(fieldsWithSuffix(curr, 	OLD)...)
-		self.trapColumnsForSqlite3(NEW)
-			
+	q.OmitFields(fieldsWithSuffix(curr, 	OLD)...)
+	
+	self.trapColumnsForSqlite3(NEW)		
 	res, err := q.Save(curr)
 	self.untrapColumnsForSqlite3()
 	
@@ -369,28 +364,35 @@ func (self *Schema) trapColumnsForSqlite3(suffix string) {
 	self.oldFieldNameToColumnName = FieldNameToColumnName
 	self.oldColumnNameToFieldName = ColumnNameToFieldName
 	self.reverse = make(map[string]string)
-	
+
+	//fmt.Printf("TRAP %s\n", suffix)	
 	v:=func(s string) string {
 		if strings.HasSuffix(s, suffix) {
 			t := s[0: len(s)-len(suffix)]
 			self.reverse[self.oldFieldNameToColumnName(t)]=
 				strings.ToLower(s[0:1])+s[1:len(s)]
+			//fmt.Printf("-->SAVE %s %+v\n", s, self.reverse)
 			return self.oldFieldNameToColumnName(t)
 		}
+		//fmt.Printf("MISS -> Col $$$ %s\n",s)
 		return self.oldFieldNameToColumnName(s)
 	}
 	FieldNameToColumnName = v
 	v=func(s string) string {
 		t, ok:=self.reverse[s]
 		if ok {
+			//fmt.Printf("-->LOAD %s %+v\n", s, self.reverse)
 			return self.oldColumnNameToFieldName(t)
 		}
+		//fmt.Printf("MISS -> Field $$$ %s\n",s)
 		return self.oldColumnNameToFieldName(s)
 	}
 	ColumnNameToFieldName = v
 }
 
 func (self *Schema) untrapColumnsForSqlite3() {
+	//fmt.Printf("UNTRAP %v %v\n", self.oldFieldNameToColumnName !=nil, 
+	//	self.oldColumnNameToFieldName !=nil)
 	if self.oldFieldNameToColumnName !=nil {
 		FieldNameToColumnName = self.oldFieldNameToColumnName
 		self.oldFieldNameToColumnName = nil

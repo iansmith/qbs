@@ -94,7 +94,9 @@ func (d base) querySql(criteria *criteria) (string, []interface{}) {
 		columns = append(columns, colName)
 	}
 	for k, v := range criteria.model.refs {
-		tableAlias := StructNameToTableName(k)
+		//IES CHANGE: Shouldn't this be a field?
+		//tableAlias := StructNameToTableName(k)
+		tableAlias := FieldNameToColumnName(k)
 		quotedTableAlias := d.dialect.quote(tableAlias)
 		quotedParentTable := d.dialect.quote(v.model.table)
 		leftKey := table + "." + d.dialect.quote(v.refKey)

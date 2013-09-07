@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "runtime/debug"
 )
 
 var driver, driverSource, dbName string
@@ -333,7 +334,8 @@ func (q *Qbs) scanRows(rowValue reflect.Value, rows *sql.Rows) (err error) {
 		key := cols[i]
 		paths := strings.Split(key, "___")
 		if len(paths) == 2 {
-			subStruct := rowValue.Elem().FieldByName(TableNameToStructName(paths[0]))
+			//IES CHANGE: Shouldn't this be a column?
+			subStruct := rowValue.Elem().FieldByName(ColumnNameToFieldName(paths[0]))
 			if subStruct.IsNil() {
 				subStruct.Set(reflect.New(subStruct.Type().Elem()))
 			}
@@ -343,7 +345,7 @@ func (q *Qbs) scanRows(rowValue reflect.Value, rows *sql.Rows) (err error) {
 				if err != nil {
 					return
 				}
-			}
+			} 
 		} else {
 			field := rowValue.Elem().FieldByName(ColumnNameToFieldName(key))
 			if field.IsValid() {
@@ -352,7 +354,7 @@ func (q *Qbs) scanRows(rowValue reflect.Value, rows *sql.Rows) (err error) {
 					return
 				}
 			}
-		}
+			}
 	}
 	return
 }
