@@ -20,7 +20,7 @@ var ConnectionLimitError = errors.New("Connection limit reached")
 var db *sql.DB
 var stmtMap map[string]*sql.Stmt
 var mu *sync.RWMutex
-var queryLogger *log.Logger = log.New(os.Stdout, "qbs:", log.LstdFlags)
+var queryLogger *log.Logger = log.New(os.Stderr, "qbs:", log.LstdFlags)
 var errorLogger *log.Logger = log.New(os.Stderr, "qbs:", log.LstdFlags)
 
 type Qbs struct {
