@@ -485,13 +485,14 @@ func doTestQueryMap(assert *Assert, mg *Migration, q *Qbs) {
 	assert.NotNil(result)
 	assert.Equal(1, result["id"])
 	assert.Equal("abc", result["name"])
-	if _, sql3 := q.Dialect.(*sqlite3); !sql3 {
-		_, ok := result["created"].(time.Time)
-		assert.True(ok)
-	} else {
-		_, ok := result["created"].(string)
-		assert.True(ok)
-	}
+
+	//if _, sql3 := q.Dialect.(*sqlite3); !sql3 {
+	_, ok := result["created"].(time.Time)
+	assert.True(ok)
+	//} else {
+	//_, ok := result["created"].(string)
+	//assert.True(ok)
+	//}
 	results, err := q.QueryMapSlice("SELECT * FROM types")
 	assert.Equal(3, len(results))
 }
